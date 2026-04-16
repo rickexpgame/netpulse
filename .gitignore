@@ -1,0 +1,28 @@
+# Node — commit package-lock.json for reproducible installs
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+
+# Runtime state (never check in)
+data.db
+data.db-journal
+data.db-wal
+data.db-shm
+*.log
+.netpulse/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Editors
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Python
+__pycache__/
+*.pyc
+.pytest_cache/

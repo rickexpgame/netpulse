@@ -1,0 +1,22 @@
+{
+  "name": "netpulse",
+  "version": "1.0.0",
+  "description": "Lightweight 24/7 network stability & speed monitor with live dashboard — pings targets every 10s, measures speed-sufficiency (not peak throughput) every 10min, never saturates your connection.",
+  "author": {
+    "name": "rickexpgame",
+    "url": "https://github.com/rickexpgame"
+  },
+  "repository": "https://github.com/rickexpgame/netpulse",
+  "license": "MIT",
+  "keywords": [
+    "network",
+    "monitor",
+    "speedtest",
+    "latency",
+    "ping",
+    "uptime",
+    "diagnostics",
+    "dashboard"
+  ],
+  "skills": "./skills"
+}

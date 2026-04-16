@@ -1,0 +1,30 @@
+{
+  "port": 8089,
+  "dbFile": "data.db",
+  "ping": {
+    "intervalSec": 10,
+    "timeoutMs": 3000,
+    "targets": [
+      { "host": "8.8.8.8",   "label": "Google DNS" },
+      { "host": "1.1.1.1",   "label": "Cloudflare" },
+      { "host": "9.9.9.9",   "label": "Quad9" }
+    ]
+  },
+  "speed": {
+    "intervalSec": 600,
+    "testUrl": "https://speed.cloudflare.com/__down?bytes=1048576",
+    "bytes": 1048576,
+    "timeoutSec": 8,
+    "thresholdMbps": 5
+  },
+  "ttfb": {
+    "intervalSec": 600,
+    "targets": [
+      { "url": "https://www.google.com/",     "label": "Google" },
+      { "url": "https://www.cloudflare.com/", "label": "Cloudflare" },
+      { "url": "https://www.github.com/",     "label": "GitHub" }
+    ],
+    "timeoutSec": 8
+  },
+  "retentionDays": 30
+}

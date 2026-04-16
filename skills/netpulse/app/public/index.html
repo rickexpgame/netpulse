@@ -1,0 +1,285 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>netpulse · network monitor</title>
+<style>
+  :root {
+    --bg: #0b0d10;
+    --card: #15181d;
+    --border: #242830;
+    --text: #e4e6eb;
+    --muted: #8b92a0;
+    --green: #3fb950;
+    --yellow: #d29922;
+    --red: #f85149;
+    --blue: #58a6ff;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; background: var(--bg); color: var(--text);
+    font: 14px -apple-system, BlinkMacSystemFont, "SF Pro Text", "Helvetica Neue", "PingFang SC", sans-serif; }
+  body { padding: 20px; max-width: 1200px; margin: 0 auto; }
+  h1 { font-size: 20px; margin: 0 0 4px 0; font-weight: 600; }
+  .subtitle { color: var(--muted); font-size: 13px; margin-bottom: 20px; }
+  .status-bar { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; margin-bottom: 24px; }
+  .stat { background: var(--card); border: 1px solid var(--border); border-radius: 8px; padding: 14px 16px; }
+  .stat .label { color: var(--muted); font-size: 11px; text-transform: uppercase; letter-spacing: 0.5px; }
+  .stat .value { font-size: 22px; font-weight: 600; margin-top: 4px; font-variant-numeric: tabular-nums; }
+  .stat .unit  { font-size: 13px; color: var(--muted); margin-left: 4px; font-weight: 400; }
+  .stat .sub   { font-size: 11px; color: var(--muted); margin-top: 2px; }
+  .health-green { color: var(--green); } .health-yellow { color: var(--yellow); } .health-red { color: var(--red); } .health-unknown { color: var(--muted); }
+  .range-picker { display: flex; gap: 6px; margin-bottom: 16px; }
+  .range-picker button { background: var(--card); color: var(--text); border: 1px solid var(--border); border-radius: 6px; padding: 6px 14px; cursor: pointer; font: inherit; font-size: 13px; }
+  .range-picker button:hover { background: #1c2128; }
+  .range-picker button.active { background: var(--blue); color: white; border-color: var(--blue); }
+  .chart-card { background: var(--card); border: 1px solid var(--border); border-radius: 8px; padding: 16px; margin-bottom: 16px; }
+  .chart-title { font-size: 14px; font-weight: 600; margin: 0 0 4px 0; }
+  .chart-hint { color: var(--muted); font-size: 12px; margin-bottom: 12px; }
+  .chart-box { position: relative; height: 220px; }
+  footer { color: var(--muted); font-size: 11px; text-align: center; margin-top: 24px; line-height: 1.7; }
+  footer code { background: var(--card); padding: 2px 6px; border-radius: 3px; }
+  footer a { color: var(--muted); text-decoration: none; }
+  footer a:hover { color: var(--blue); }
+  @media (max-width: 680px) { .status-bar { grid-template-columns: repeat(2, 1fr); } }
+</style>
+</head>
+<body>
+  <h1>netpulse</h1>
+  <div class="subtitle" id="subtitle">Loading…</div>
+
+  <div class="status-bar">
+    <div class="stat">
+      <div class="label">Health</div>
+      <div class="value" id="s-health">—</div>
+      <div class="sub">Last hour</div>
+    </div>
+    <div class="stat">
+      <div class="label">Latency</div>
+      <div class="value" id="s-latency">—<span class="unit">ms</span></div>
+      <div class="sub">Last 5 min avg</div>
+    </div>
+    <div class="stat">
+      <div class="label">Packet Loss</div>
+      <div class="value" id="s-loss">—<span class="unit">%</span></div>
+      <div class="sub" id="s-loss-sub">Last hour</div>
+    </div>
+    <div class="stat">
+      <div class="label">Speed</div>
+      <div class="value" id="s-speed">—<span class="unit">Mbps</span></div>
+      <div class="sub" id="s-speed-sub">Latest sample</div>
+    </div>
+  </div>
+
+  <div class="range-picker">
+    <button data-range="1h">1h</button>
+    <button data-range="6h">6h</button>
+    <button data-range="24h" class="active">24h</button>
+    <button data-range="7d">7d</button>
+  </div>
+
+  <div class="chart-card">
+    <div class="chart-title">Latency</div>
+    <div class="chart-hint">Round-trip time per ping target. Lower is better.</div>
+    <div class="chart-box"><canvas id="chart-latency"></canvas></div>
+  </div>
+
+  <div class="chart-card">
+    <div class="chart-title">Packet Loss</div>
+    <div class="chart-hint">% of pings lost per bucket (avg across all targets). Spikes = instability.</div>
+    <div class="chart-box"><canvas id="chart-loss"></canvas></div>
+  </div>
+
+  <div class="chart-card">
+    <div class="chart-title">Speed Samples</div>
+    <div class="chart-hint" id="chart-speed-hint">Measured Mbps from test downloads. Red dashed line = threshold.</div>
+    <div class="chart-box"><canvas id="chart-speed"></canvas></div>
+  </div>
+
+  <div class="chart-card">
+    <div class="chart-title">Time-to-First-Byte</div>
+    <div class="chart-hint">TTFB per target — reflects how snappy pages feel.</div>
+    <div class="chart-box"><canvas id="chart-ttfb"></canvas></div>
+  </div>
+
+  <footer>
+    <div id="cfg-hint">Ping · speedtest · TTFB · 30-day retention</div>
+    <div>Serving at <code id="host">—</code> · <a href="https://github.com/rickexpgame/netpulse" target="_blank" rel="noopener">netpulse on GitHub</a></div>
+  </footer>
+
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/chartjs-adapter-date-fns@3.0.0/dist/chartjs-adapter-date-fns.bundle.min.js"></script>
+<script>
+  // Deterministic color per target string — stable across reloads.
+  const PALETTE = ['#58a6ff', '#3fb950', '#d29922', '#f85149', '#bc8cff', '#ff7b72', '#7ee787', '#ffa657', '#56d4dd', '#d2a8ff'];
+  function hashColor(str) {
+    let h = 0;
+    for (const c of str) h = ((h << 5) - h) + c.charCodeAt(0) | 0;
+    return PALETTE[Math.abs(h) % PALETTE.length];
+  }
+
+  let currentRange = '24h';
+  let THRESHOLD = 5;
+  const charts = {};
+
+  async function getJson(url) {
+    const r = await fetch(url, { cache: 'no-store' });
+    if (!r.ok) throw new Error(`HTTP ${r.status}`);
+    return r.json();
+  }
+  const fmtNum = (n, d = 1) => (n == null || Number.isNaN(n)) ? '—' : n.toFixed(d);
+  const fmtPct = (r) => r == null ? '—' : (r * 100).toFixed(1);
+
+  function makeChart(canvasId, type, datasets, options = {}) {
+    if (charts[canvasId]) charts[canvasId].destroy();
+    charts[canvasId] = new Chart(document.getElementById(canvasId).getContext('2d'), {
+      type, data: { datasets },
+      options: {
+        responsive: true, maintainAspectRatio: false, animation: false,
+        interaction: { mode: 'nearest', intersect: false },
+        plugins: {
+          legend: { labels: { color: '#e4e6eb', font: { size: 11 } } },
+          tooltip: { backgroundColor: '#0b0d10', titleColor: '#e4e6eb', bodyColor: '#e4e6eb' },
+        },
+        ...options,
+      },
+    });
+  }
+
+  function baseScales(unit) {
+    return {
+      x: { type: 'time', ticks: { color: '#8b92a0', maxTicksLimit: 8 }, grid: { color: '#242830' } },
+      y: { ticks: { color: '#8b92a0', callback: (v) => v + ' ' + unit }, grid: { color: '#242830' }, beginAtZero: true },
+    };
+  }
+
+  function renderLatency(pingRows) {
+    const byTarget = {};
+    for (const r of pingRows) (byTarget[r.target] ||= []).push({ x: r.bucket_ts, y: r.avg_latency });
+    const datasets = Object.entries(byTarget).map(([target, data]) => ({
+      label: target, data, borderColor: hashColor(target),
+      backgroundColor: hashColor(target) + '22',
+      borderWidth: 1.8, pointRadius: 0, tension: 0.25, spanGaps: true,
+    }));
+    makeChart('chart-latency', 'line', datasets, { scales: baseScales('ms') });
+  }
+
+  function renderLoss(pingRows) {
+    const byBucket = {};
+    for (const r of pingRows) (byBucket[r.bucket_ts] ||= []).push(r.loss_rate);
+    const data = Object.entries(byBucket)
+      .map(([ts, rates]) => ({ x: +ts, y: (rates.reduce((a, b) => a + b, 0) / rates.length) * 100 }))
+      .sort((a, b) => a.x - b.x);
+    makeChart('chart-loss', 'bar', [{
+      label: 'Loss %', data,
+      backgroundColor: data.map(d => d.y >= 5 ? '#f85149' : d.y >= 1 ? '#d29922' : '#3fb950'),
+      borderWidth: 0,
+    }], {
+      scales: {
+        x: { type: 'time', ticks: { color: '#8b92a0', maxTicksLimit: 8 }, grid: { color: '#242830' } },
+        y: { ticks: { color: '#8b92a0', callback: v => v + '%' }, grid: { color: '#242830' }, beginAtZero: true, max: 100 },
+      },
+    });
+  }
+
+  function renderSpeed(speedRows) {
+    const passed  = speedRows.filter(r =>  r.passed && !r.failed).map(r => ({ x: r.ts, y: r.mbps }));
+    const failed  = speedRows.filter(r => !r.passed && !r.failed).map(r => ({ x: r.ts, y: r.mbps }));
+    const errored = speedRows.filter(r =>  r.failed).map(r => ({ x: r.ts, y: 0 }));
+
+    const datasets = [
+      { label: `Pass (≥${THRESHOLD} Mbps)`, data: passed,  backgroundColor: '#3fb950', pointRadius: 3 },
+      { label: `Fail (<${THRESHOLD} Mbps)`, data: failed,  backgroundColor: '#d29922', pointRadius: 3 },
+      { label: 'Errored',                   data: errored, backgroundColor: '#f85149', pointRadius: 4, pointStyle: 'crossRot' },
+    ];
+    if (speedRows.length) {
+      const xs = speedRows.map(r => r.ts);
+      datasets.push({
+        label: `Threshold ${THRESHOLD} Mbps`, type: 'line',
+        data: [{ x: Math.min(...xs), y: THRESHOLD }, { x: Math.max(...xs), y: THRESHOLD }],
+        borderColor: '#f85149', borderWidth: 1.5, borderDash: [6, 4], pointRadius: 0, fill: false,
+      });
+    }
+    makeChart('chart-speed', 'scatter', datasets, { scales: baseScales('Mbps') });
+  }
+
+  function renderTtfb(ttfbRows) {
+    const byTarget = {};
+    for (const r of ttfbRows) (byTarget[r.target] ||= []).push({ x: r.bucket_ts, y: r.avg_ttfb });
+    const datasets = Object.entries(byTarget).map(([target, data]) => ({
+      label: target, data, borderColor: hashColor(target),
+      backgroundColor: hashColor(target) + '22',
+      borderWidth: 1.8, pointRadius: 0, tension: 0.25, spanGaps: true,
+    }));
+    makeChart('chart-ttfb', 'line', datasets, { scales: baseScales('ms') });
+  }
+
+  function renderSummary(s) {
+    const healthEl = document.getElementById('s-health');
+    healthEl.textContent = { green: '✓ Good', yellow: '⚠ Degraded', red: '✗ Bad', unknown: '—' }[s.health];
+    healthEl.className = 'value health-' + s.health;
+
+    document.getElementById('s-latency').innerHTML =
+      fmtNum(s.last_5_min_ping.avg_latency, 0) + '<span class="unit">ms</span>';
+
+    const lossPct = (s.last_hour.ping.loss_rate || 0) * 100;
+    document.getElementById('s-loss').innerHTML = fmtNum(lossPct, 1) + '<span class="unit">%</span>';
+    document.getElementById('s-loss-sub').textContent =
+      `${s.last_hour.ping.losses || 0}/${s.last_hour.ping.samples || 0} samples`;
+
+    if (s.latest_speed) {
+      if (s.latest_speed.failed) {
+        document.getElementById('s-speed').innerHTML = '<span class="health-red">errored</span>';
+        document.getElementById('s-speed-sub').textContent = s.latest_speed.error || 'timeout';
+      } else {
+        const color = s.latest_speed.passed ? 'health-green' : 'health-yellow';
+        document.getElementById('s-speed').innerHTML =
+          `<span class="${color}">${fmtNum(s.latest_speed.mbps, 1)}</span><span class="unit">Mbps</span>`;
+        const ago = Math.round((Date.now() - s.latest_speed.ts) / 60_000);
+        document.getElementById('s-speed-sub').textContent =
+          `Pass ${fmtPct(s.last_hour.speed.pass_rate)}% · ${ago}m ago`;
+      }
+    }
+
+    document.getElementById('subtitle').textContent =
+      `Threshold ${s.threshold_mbps} Mbps · Updated ${new Date(s.now).toLocaleTimeString()}`;
+  }
+
+  async function reload() {
+    try {
+      const [summary, data, cfg] = await Promise.all([
+        getJson('/api/summary'),
+        getJson('/api/data?range=' + currentRange),
+        getJson('/api/config'),
+      ]);
+      THRESHOLD = cfg.threshold_mbps;
+      document.getElementById('chart-speed-hint').textContent =
+        `Measured Mbps from ${cfg.speed_interval_sec / 60}-minute test downloads. Red dashed line = ${THRESHOLD} Mbps threshold.`;
+      document.getElementById('cfg-hint').textContent =
+        `Ping every ${cfg.ping_interval_sec}s · Speed test every ${cfg.speed_interval_sec / 60}min · ${cfg.retention_days}-day retention`;
+      renderSummary(summary);
+      renderLatency(data.pings);
+      renderLoss(data.pings);
+      renderSpeed(data.speeds);
+      renderTtfb(data.ttfb);
+    } catch (e) {
+      console.error(e);
+      document.getElementById('subtitle').textContent = 'Error: ' + e.message;
+    }
+  }
+
+  document.querySelectorAll('.range-picker button').forEach(btn => {
+    btn.addEventListener('click', () => {
+      document.querySelectorAll('.range-picker button').forEach(b => b.classList.remove('active'));
+      btn.classList.add('active');
+      currentRange = btn.dataset.range;
+      reload();
+    });
+  });
+
+  document.getElementById('host').textContent = window.location.host;
+  reload();
+  setInterval(reload, 30_000);
+</script>
+</body>
+</html>
