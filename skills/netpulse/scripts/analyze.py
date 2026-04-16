@@ -301,8 +301,12 @@ def render_markdown(r):
             out.append(f"- **Pass rate:** {s['passed']}/{s['total']} ({pass_rate:.1f}%)")
             out.append(f"- **Median speed:** {s['mbps_median']:.1f} Mbps  ·  mean {s['mbps_mean']:.1f} Mbps")
             out.append(f"- **Range:** {s['mbps_min']:.1f} – {s['mbps_max']:.1f} Mbps")
-            out.append(f"- **Stability:** CV {s['mbps_cv_pct']:.1f}% (stdev / mean)")
-            out.append(f"- **Download latency:** median {s['duration_median_ms']}ms for test file")
+            if s["mbps_cv_pct"] is not None:
+                out.append(f"- **Stability:** CV {s['mbps_cv_pct']:.1f}% (stdev / mean)")
+            else:
+                out.append(f"- **Stability:** (need ≥3 samples for variance)")
+            if s["duration_median_ms"] is not None:
+                out.append(f"- **Download latency:** median {s['duration_median_ms']}ms for test file")
         out.append("")
 
     # 6. TTFB
