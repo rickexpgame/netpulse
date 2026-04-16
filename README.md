@@ -108,6 +108,20 @@ skills/netpulse/
 
 State lives in `~/.netpulse/` (config, database, logs). The plugin cache is read-only — updates never clobber your data.
 
+## Security & supply chain
+
+This plugin executes code on your machine via `npm install` (which compiles native sqlite bindings) and runs a long-lived daemon. A few sensible practices:
+
+- **Pin to a release tag**, not `main`. After v1.0.2 is tagged, use:
+  ```
+  claude plugin add github:rickexpgame/netpulse@v1.0.2
+  ```
+  This prevents an unexpected `main`-branch change from being picked up silently.
+- **Verify the commit SHA** in `~/.claude/plugins/installed_plugins.json` after install. For v1.0.2, the tag's SHA is stable — compare it to what GitHub shows at `https://github.com/rickexpgame/netpulse/releases/tag/v1.0.2`.
+- **Read the diff** before upgrading across versions.
+- All state (config, SQLite DB, logs) is private-by-default: `~/.netpulse/` is created with mode `700`, files with `600`. The dashboard binds to `127.0.0.1` only.
+- The dashboard's JS (Chart.js) is **vendored locally** — no CDN fetch at runtime. See `skills/netpulse/app/public/vendor/SHA384SUMS.txt`.
+
 ## License
 
 MIT — see [LICENSE](LICENSE).

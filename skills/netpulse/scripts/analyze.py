@@ -24,10 +24,21 @@ def ms_to_dt(ms):
 
 
 def percentile(sorted_values, pct):
+    """Linear-interpolated quantile. Matches numpy's default 'linear' method.
+    Unlike nearest-rank, this gives sensible answers on sparse data:
+      values=[1, 100], pct=50 → 50.5 (midpoint), not 100."""
     if not sorted_values:
         return None
-    idx = min(len(sorted_values) - 1, int(len(sorted_values) * pct / 100))
-    return sorted_values[idx]
+    n = len(sorted_values)
+    if n == 1:
+        return sorted_values[0]
+    # k in [0, n-1]; fractional position on the sorted index line
+    k = (n - 1) * (pct / 100.0)
+    f = int(k)           # lower index
+    c = min(f + 1, n - 1)  # upper index
+    if f == c:
+        return float(sorted_values[f])
+    return sorted_values[f] + (sorted_values[c] - sorted_values[f]) * (k - f)
 
 
 def resolve_db_path():
@@ -319,22 +330,42 @@ def render_markdown(r):
             out.append(f"| {t['target']} | {t['p50_ms']:.0f}ms | {t['p90_ms']:.0f}ms | {t['failures']}/{t['samples']} |")
         out.append("")
 
-    # Summary verdict
+    # ── Summary verdict ─────────────────────────────────────────────────────
+    # Judge by the *worst* target for a blanket verdict. Separately note
+    # correlation (from section 4): if worst is an outlier, call it path-specific.
     out.append("---")
     out.append("")
-    lat_summary = "healthy"
+    lat_summary = "insufficient data"
     if r["latency_distribution"]:
-        worst_loss = max(d["loss_pct"] for d in r["latency_distribution"])
-        healthy_loss = min(d["loss_pct"] for d in r["latency_distribution"])
-        if healthy_loss < 1:
+        losses = [d["loss_pct"] for d in r["latency_distribution"]]
+        worst = max(losses)
+        best = min(losses)
+        n = len(losses)
+        ok_count = sum(1 for l in losses if l < 1)
+
+        # correlation-aware: a single bad target among many → likely upstream path issue
+        corr = r.get("correlation") or {}
+        overlaps = [o["overlap_pct"] for o in corr.get("others", [])]
+        max_overlap = max(overlaps) if overlaps else None
+
+        if best >= 5:
+            lat_summary = f"significant degradation across all targets ({best:.1f}%–{worst:.1f}% loss)"
+        elif best >= 1:
+            lat_summary = f"mild loss across all targets ({best:.1f}%–{worst:.1f}%)"
+        elif worst >= 5 and ok_count >= n - 1 and (max_overlap is None or max_overlap < 30):
+            lat_summary = f"infrastructure healthy; one upstream path degraded ({worst:.1f}% loss, likely path-specific)"
+        elif worst >= 5:
+            lat_summary = f"partial degradation ({worst:.1f}% loss on at least one target, possibly local)"
+        elif worst >= 1:
+            lat_summary = "mostly healthy with minor intermittent loss"
+        else:
             lat_summary = "infrastructure healthy"
-            if worst_loss > 5:
-                lat_summary += f" (but one target shows {worst_loss:.1f}% loss — path-specific)"
-    if s["total"] > 0 and s["passed"] / s["total"] > 0.95:
+
+    if s["total"] > 0 and s["passed"] / s["total"] >= 0.95:
         speed_summary = "bandwidth consistently meets threshold"
     elif s["total"] > 0:
         pass_rate = s["passed"] / s["total"] * 100
-        speed_summary = f"threshold passed {pass_rate:.1f}% of the time"
+        speed_summary = f"threshold passed only {pass_rate:.1f}% of the time"
     else:
         speed_summary = "not enough speed samples yet"
     out.append(f"**Overall:** {lat_summary}; {speed_summary}.")

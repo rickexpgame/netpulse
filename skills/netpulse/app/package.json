@@ -1,6 +1,6 @@
 {
   "name": "netpulse",
-  "version": "1.0.0",
+  "version": "1.0.2",
   "description": "Lightweight 24/7 network stability & speed monitor",
   "main": "start.js",
   "scripts": {

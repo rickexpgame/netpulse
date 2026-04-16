@@ -3,6 +3,10 @@
 # whichever applies wins; the rest are no-ops.
 set -euo pipefail
 
+SKILL_DIR="$(cd "$(dirname "$0")/.." && pwd)"
+# shellcheck source=lib.sh
+. "$SKILL_DIR/scripts/lib.sh"
+
 NETPULSE_DIR="${NETPULSE_DIR:-$HOME/.netpulse}"
 PID_FILE="$NETPULSE_DIR/netpulse.pid"
 LABEL="com.netpulse"
@@ -26,15 +30,17 @@ if [ "$OS" = "Linux" ] && command -v systemctl >/dev/null 2>&1; then
   fi
 fi
 
-# nohup fallback
+# nohup fallback — validated PID before kill so we never shoot an unrelated process
 if [ -f "$PID_FILE" ]; then
-  PID="$(cat "$PID_FILE")"
-  if kill -0 "$PID" 2>/dev/null; then
+  PID="$(cat "$PID_FILE" 2>/dev/null || true)"
+  if is_netpulse_pid "$PID"; then
     kill "$PID"
     sleep 0.5
-    kill -0 "$PID" 2>/dev/null && kill -9 "$PID" 2>/dev/null || true
+    is_netpulse_pid "$PID" && kill -9 "$PID" 2>/dev/null || true
     echo "✓ Stopped background process (pid $PID)"
     stopped_any=1
+  else
+    echo "  Stale pidfile cleared (pid=$PID not a netpulse process)"
   fi
   rm -f "$PID_FILE"
 fi

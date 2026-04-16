@@ -4,10 +4,10 @@ const http = require('http');
 const fs = require('fs');
 const path = require('path');
 const { URL } = require('url');
-const { loadConfig, APP_DIR } = require('./paths');
+const { loadConfigOrDie, APP_DIR } = require('./paths');
 const { openDb } = require('./db');
 
-const CONFIG = loadConfig();
+const CONFIG = loadConfigOrDie();
 const PORT = parseInt(process.env.PORT || CONFIG.port, 10);
 const db = openDb(CONFIG.dbPath);
 
@@ -158,6 +158,16 @@ const server = http.createServer((req, res) => {
     if (pathname === '/' || pathname === '/index.html') {
       return serveStatic(res, path.join(APP_DIR, 'public', 'index.html'));
     }
+    // Vendored JS (Chart.js + date adapter). Tightly scoped: only this prefix,
+    // only .js files, no traversal. The safe path is rebuilt from the basename
+    // so attempts like /vendor/../../../etc/passwd are impossible.
+    if (pathname.startsWith('/vendor/')) {
+      const base = path.basename(pathname);
+      if (!/^[A-Za-z0-9._-]+\.js$/.test(base)) {
+        res.writeHead(404); res.end('Not found'); return;
+      }
+      return serveStatic(res, path.join(APP_DIR, 'public', 'vendor', base));
+    }
     res.writeHead(404); res.end('Not found');
   } catch (e) {
     console.error('[server] error:', e);
@@ -165,9 +175,31 @@ const server = http.createServer((req, res) => {
   }
 });
 
+// ── Explicit error handling so port conflicts produce a useful log line
+// instead of a bare stack trace that launchd/systemd will just restart-loop on.
+server.on('error', (err) => {
+  if (err.code === 'EADDRINUSE') {
+    console.error(`[server] Port ${PORT} is already in use by another process.`);
+    console.error(`[server] Fix by either:`);
+    console.error(`[server]   1. Stopping whatever else is on that port (lsof -iTCP:${PORT}), or`);
+    console.error(`[server]   2. Changing "port" in ${CONFIG._source} and restarting.`);
+  } else if (err.code === 'EACCES') {
+    console.error(`[server] Permission denied binding to port ${PORT}. Use a port >= 1024.`);
+  } else {
+    console.error(`[server] ${err.code || 'error'}: ${err.message}`);
+  }
+  process.exit(1);
+});
+
 server.listen(PORT, '127.0.0.1', () => {
   console.log(`[server]  Listening on http://127.0.0.1:${PORT}`);
 });
 
-process.on('SIGTERM', () => { server.close(); db.close(); process.exit(0); });
-process.on('SIGINT',  () => { server.close(); db.close(); process.exit(0); });
+function shutdown(sig) {
+  console.log(`[server]  ${sig} received, closing…`);
+  server.close(() => { db.close(); process.exit(0); });
+  // Force-exit if close hangs (e.g. long-lived client keep-alive)
+  setTimeout(() => process.exit(0), 3000).unref();
+}
+process.on('SIGTERM', () => shutdown('SIGTERM'));
+process.on('SIGINT',  () => shutdown('SIGINT'));

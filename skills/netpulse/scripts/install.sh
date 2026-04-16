@@ -7,12 +7,17 @@ SKILL_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 APP_DIR="$SKILL_DIR/app"
 NETPULSE_DIR="${NETPULSE_DIR:-$HOME/.netpulse}"
 
+# Private-by-default: config/db may contain identifying info on shared hosts
+umask 077
+
 echo "→ Creating state directory: $NETPULSE_DIR"
 mkdir -p "$NETPULSE_DIR/logs"
+chmod 700 "$NETPULSE_DIR" 2>/dev/null || true
 
 # Seed config from defaults (don't clobber user edits)
 if [ ! -f "$NETPULSE_DIR/config.json" ]; then
   cp "$APP_DIR/config.default.json" "$NETPULSE_DIR/config.json"
+  chmod 600 "$NETPULSE_DIR/config.json" 2>/dev/null || true
   echo "→ Seeded config: $NETPULSE_DIR/config.json"
 else
   echo "→ Keeping existing config: $NETPULSE_DIR/config.json"

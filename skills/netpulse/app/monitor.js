@@ -4,10 +4,10 @@
 // measurement never stops the daemon.
 const { spawn } = require('child_process');
 const os = require('os');
-const { loadConfig } = require('./paths');
+const { loadConfigOrDie } = require('./paths');
 const { openDb, pruneOldRows } = require('./db');
 
-const CONFIG = loadConfig();
+const CONFIG = loadConfigOrDie();
 const db = openDb(CONFIG.dbPath);
 
 // ── Platform-specific ping flags ────────────────────────────────────────────

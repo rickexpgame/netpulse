@@ -2,7 +2,7 @@
 name: netpulse
 description: Lightweight 24/7 network stability & speed monitor with live web dashboard. Continuously pings targets (~2MB/day), periodically measures download throughput (~150MB/day total), serves charts at localhost:8089, and generates deep-dive Markdown reports. Cross-platform (macOS/Linux; Windows via WSL). Use this skill when the user says '监控网络', '网络稳定性', '网络测速', '24小时测网速', '持续测速', '测网络', 'monitor my network', 'network dashboard', 'is my internet stable', 'check internet over time', 'diagnose network issues', 'netpulse', or describes ongoing network issues and wants to diagnose them across hours or days instead of running a one-shot speedtest.
 user_invocable: true
-version: "1.0.0"
+version: "1.0.2"
 ---
 
 # netpulse — network stability & speed monitor
@@ -37,16 +37,18 @@ All samples land in a local SQLite file (`~/.netpulse/data.db`). A built-in web 
 
 ## Quick start — the happy path
 
-From a fresh install, assuming the user said "set up netpulse" or equivalent:
+From a fresh install, assuming the user said "set up netpulse" or equivalent, run the lifecycle scripts using their **absolute paths** (the skill's install location — resolve it from this SKILL.md's directory; don't rely on `$0` since the agent shell context may have that as the shell name):
 
 ```bash
-SKILL="$(dirname "$0")"        # Claude: use the absolute skill path
-$SKILL/scripts/install.sh       # seeds ~/.netpulse + npm install
-$SKILL/scripts/start-bg.sh      # registers launchd / systemd / nohup
-open http://127.0.0.1:8089      # (macOS) or: xdg-open / print URL
+# Substitute <skill-dir> with the absolute path to this skill's folder,
+# e.g. ~/.claude/plugins/cache/netpulse/netpulse/1.0.2/skills/netpulse
+bash <skill-dir>/scripts/install.sh      # seeds ~/.netpulse + npm install
+bash <skill-dir>/scripts/start-bg.sh     # registers launchd / systemd / nohup
 ```
 
-That's it. Data starts flowing in ~10 s (first ping) and the first speed sample appears after ~10 min.
+Then tell the user the dashboard is at `http://127.0.0.1:8089/` (macOS: offer to `open` it; Linux: suggest `xdg-open`).
+
+Data starts flowing in ~10 s (first ping) and the first speed sample appears after ~10 min.
 
 ## Lifecycle commands
 

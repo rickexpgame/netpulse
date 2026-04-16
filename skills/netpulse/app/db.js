@@ -1,12 +1,25 @@
 // SQLite setup. WAL mode so the writer (monitor) and reader (server) share
 // the file without locking each other out.
+const fs = require('fs');
 const Database = require('better-sqlite3');
 
 function openDb(dbPath) {
+  // Restrictive perms: samples may reveal browsing patterns on shared hosts.
+  // Apply BEFORE first open so the file is born private. We also re-apply after
+  // open in case better-sqlite3 recreated the file with the process umask.
+  const existed = fs.existsSync(dbPath);
   const db = new Database(dbPath);
+  try { fs.chmodSync(dbPath, 0o600); } catch (_) { /* filesystem may not support chmod */ }
   db.pragma('journal_mode = WAL');
   db.pragma('synchronous = NORMAL');
   db.pragma('busy_timeout = 5000');
+  // WAL creates side-files -wal and -shm; tighten those too.
+  for (const suffix of ['-wal', '-shm']) {
+    try { fs.chmodSync(dbPath + suffix, 0o600); } catch (_) {}
+  }
+  if (!existed) {
+    console.log(`[db]     Created ${dbPath} (mode 600)`);
+  }
 
   db.exec(`
     CREATE TABLE IF NOT EXISTS pings (

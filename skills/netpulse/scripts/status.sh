@@ -3,6 +3,9 @@
 set -euo pipefail
 
 SKILL_DIR="$(cd "$(dirname "$0")/.." && pwd)"
+# shellcheck source=lib.sh
+. "$SKILL_DIR/scripts/lib.sh"
+
 NETPULSE_DIR="${NETPULSE_DIR:-$HOME/.netpulse}"
 CFG="$NETPULSE_DIR/config.json"
 DB="$NETPULSE_DIR/data.db"
@@ -40,8 +43,13 @@ if [ "$OS" = "Linux" ] && command -v systemctl >/dev/null 2>&1; then
     echo "    systemd:  not registered"
   fi
 fi
-if [ -f "$PID_FILE" ] && kill -0 "$(cat "$PID_FILE")" 2>/dev/null; then
-  echo "    nohup:    RUNNING (pid $(cat "$PID_FILE"))"
+if [ -f "$PID_FILE" ]; then
+  PID_CONTENT="$(cat "$PID_FILE" 2>/dev/null || true)"
+  if is_netpulse_pid "$PID_CONTENT"; then
+    echo "    nohup:    RUNNING (pid $PID_CONTENT)"
+  else
+    echo "    nohup:    stale pidfile ($PID_FILE, pid=$PID_CONTENT) — run stop.sh to clean"
+  fi
 fi
 
 # Port
