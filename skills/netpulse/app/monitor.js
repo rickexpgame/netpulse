@@ -6,6 +6,7 @@ const { spawn } = require('child_process');
 const os = require('os');
 const { loadConfigOrDie } = require('./paths');
 const { openDb, pruneOldRows } = require('./db');
+const { isInterfaceBusy } = require('./net-stats');
 
 const CONFIG = loadConfigOrDie();
 const db = openDb(CONFIG.dbPath);
@@ -89,6 +90,8 @@ function downloadBytes(url, timeoutSec) {
   });
 }
 
+// Run one probe. Returns { ok, mbps?, passed?, failed?, error? } so callers
+// (adaptive cadence) can decide the next interval.
 async function runSpeedTest() {
   const ts = Date.now();
   const cfg = CONFIG.speed;
@@ -96,12 +99,13 @@ async function runSpeedTest() {
   if (!res.ok) {
     insertSpeed.run(ts, cfg.bytes, res.durationMs || 0, 0, 0, 1, res.error);
     console.log(`[speed] ${new Date(ts).toISOString()} FAILED (${res.error})`);
-    return;
+    return { ok: false, failed: 1, error: res.error };
   }
   const mbps = (res.bytes * 8) / (res.durationMs / 1000) / 1_000_000;
   const passed = mbps >= cfg.thresholdMbps ? 1 : 0;
   insertSpeed.run(ts, res.bytes, res.durationMs, mbps, passed, 0, null);
   console.log(`[speed] ${new Date(ts).toISOString()} ${mbps.toFixed(2)} Mbps (${res.bytes}B in ${res.durationMs}ms) ${passed ? '✓' : '✗'} threshold=${cfg.thresholdMbps}`);
+  return { ok: true, mbps, passed };
 }
 
 // ── TTFB: HEAD request, measure time_starttransfer ──────────────────────────
@@ -150,7 +154,7 @@ async function pruneLoop() {
   if (deleted > 0) console.log(`[prune] Deleted ${deleted} rows older than ${CONFIG.retentionDays} days`);
 }
 
-// ── Driver ──────────────────────────────────────────────────────────────────
+// ── Fixed-cadence driver (used for ping / ttfb / prune) ────────────────────
 function startLoop(fn, intervalSec, label) {
   const run = async () => {
     try { await fn(); }
@@ -160,11 +164,83 @@ function startLoop(fn, intervalSec, label) {
   setInterval(run, intervalSec * 1000);
 }
 
-console.log(`[monitor] Starting on ${platform} — ping/${CONFIG.ping.intervalSec}s, speed/${CONFIG.speed.intervalSec}s, threshold=${CONFIG.speed.thresholdMbps}Mbps, db=${CONFIG.dbPath}`);
+// ── Adaptive + idle-gated speed loop ───────────────────────────────────────
+// Two layered optimisations on top of the fixed-cadence speed probe:
+//
+//   (d) Idle gate — before running the probe, sample local NIC throughput.
+//       If it exceeds idleGate.thresholdKbps, skip this cycle. This avoids
+//       competing for bandwidth with the user's own active sessions (video
+//       calls, downloads). Does NOT see other devices on the LAN.
+//
+//   (f) Adaptive cadence — after N consecutive healthy probes (mbps >= 2x
+//       threshold), double the interval up to maxIntervalSec. Any degraded
+//       probe resets to the configured base interval. Cuts daily probe
+//       volume by ~50–80% on consistently-healthy networks.
+//
+// Both default ON but each can be disabled independently via config.
+// Disabling both yields behaviour identical to v1.0.2.
+let speedIntervalSec = CONFIG.speed.intervalSec;
+let healthyStreak    = 0;
+const adaptiveOn     = !!(CONFIG.speed.adaptive && CONFIG.speed.adaptive.enabled);
+const idleGateOn     = !!(CONFIG.speed.idleGate && CONFIG.speed.idleGate.enabled);
+const HEALTHY_MULT   = 2;
+const HEALTHY_STREAK = 3;
+
+async function speedTick() {
+  try {
+    // (d) Idle gate
+    if (idleGateOn) {
+      const cfg = CONFIG.speed.idleGate;
+      const { busy, iface, kbps } = await isInterfaceBusy(cfg.thresholdKbps, cfg.sampleWindowSec);
+      if (busy) {
+        console.log(
+          `[speed] ${new Date().toISOString()} SKIP (iface ${iface} at ${(kbps || 0).toFixed(0)} kbps > ${cfg.thresholdKbps} kbps — user active)`
+        );
+        return;  // Don't advance adaptive state; just retry at current cadence.
+      }
+    }
+
+    // Probe
+    const res = await runSpeedTest();
+
+    // (f) Adaptive cadence
+    if (adaptiveOn && res) {
+      const healthyThresh = CONFIG.speed.thresholdMbps * HEALTHY_MULT;
+      const isHealthy = res.ok && typeof res.mbps === 'number' && res.mbps >= healthyThresh;
+      if (isHealthy) {
+        healthyStreak++;
+        if (healthyStreak >= HEALTHY_STREAK) {
+          const next = Math.min(CONFIG.speed.adaptive.maxIntervalSec, speedIntervalSec * 2);
+          if (next !== speedIntervalSec) {
+            console.log(`[speed] adaptive: ${healthyStreak} healthy probes, cadence ${speedIntervalSec}s → ${next}s`);
+            speedIntervalSec = next;
+          }
+        }
+      } else {
+        if (speedIntervalSec > CONFIG.speed.adaptive.minIntervalSec || healthyStreak > 0) {
+          console.log(`[speed] adaptive: degraded/failed — cadence → ${CONFIG.speed.adaptive.minIntervalSec}s`);
+        }
+        healthyStreak = 0;
+        speedIntervalSec = CONFIG.speed.adaptive.minIntervalSec;
+      }
+    }
+  } catch (e) {
+    console.error('[speed] tick error:', e.message);
+  } finally {
+    setTimeout(speedTick, speedIntervalSec * 1000);
+  }
+}
+
+console.log(
+  `[monitor] Starting on ${platform} — ping/${CONFIG.ping.intervalSec}s, ` +
+  `speed/${CONFIG.speed.intervalSec}s (idleGate=${idleGateOn ? 'on' : 'off'}, adaptive=${adaptiveOn ? 'on' : 'off'}), ` +
+  `threshold=${CONFIG.speed.thresholdMbps}Mbps, db=${CONFIG.dbPath}`
+);
 startLoop(pingAllTargets, CONFIG.ping.intervalSec, 'ping');
-startLoop(runSpeedTest,   CONFIG.speed.intervalSec, 'speed');
 startLoop(runTtfb,        CONFIG.ttfb.intervalSec,  'ttfb');
 startLoop(pruneLoop,      86400,                    'prune');
+// Speed loop is self-scheduling (adaptive cadence requires dynamic intervals).
+speedTick().catch((e) => console.error('[speed] fatal:', e));
 
 process.on('SIGTERM', () => { console.log('[monitor] SIGTERM'); db.close(); process.exit(0); });
 process.on('SIGINT',  () => { console.log('[monitor] SIGINT');  db.close(); process.exit(0); });

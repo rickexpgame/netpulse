@@ -114,7 +114,7 @@ This plugin executes code on your machine via `npm install` (which compiles nati
 
 - **Pin to a release tag**, not `main`. After v1.0.2 is tagged, use:
   ```
-  claude plugin add github:rickexpgame/netpulse@v1.0.2
+  claude plugin add github:rickexpgame/netpulse@v1.0.3
   ```
   This prevents an unexpected `main`-branch change from being picked up silently.
 - **Verify the commit SHA** in `~/.claude/plugins/installed_plugins.json` after install. For v1.0.2, the tag's SHA is stable — compare it to what GitHub shows at `https://github.com/rickexpgame/netpulse/releases/tag/v1.0.2`.

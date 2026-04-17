@@ -2,7 +2,7 @@
 name: netpulse
 description: Lightweight 24/7 network stability & speed monitor with live web dashboard. Continuously pings targets (~2MB/day), periodically measures download throughput (~150MB/day total), serves charts at localhost:8089, and generates deep-dive Markdown reports. Cross-platform (macOS/Linux; Windows via WSL). Use this skill when the user says '监控网络', '网络稳定性', '网络测速', '24小时测网速', '持续测速', '测网络', 'monitor my network', 'network dashboard', 'is my internet stable', 'check internet over time', 'diagnose network issues', 'netpulse', or describes ongoing network issues and wants to diagnose them across hours or days instead of running a one-shot speedtest.
 user_invocable: true
-version: "1.0.2"
+version: "1.0.3"
 ---
 
 # netpulse — network stability & speed monitor
@@ -14,7 +14,9 @@ version: "1.0.2"
 netpulse runs three lightweight loops forever:
 
 - **Ping** every 10 s to 3 global targets → catches latency drift & packet loss
-- **Speed** every 10 min — downloads a **1 MB** file and records Mbps → checks whether the link *meets a usability threshold* (default 5 Mbps for smooth 1080p), **not** how fast it can possibly go. This is why it doesn't saturate your connection.
+- **Speed** every 10 min (baseline) — downloads a **1 MB** file and records Mbps → checks whether the link *meets a usability threshold* (default 5 Mbps for smooth 1080p), **not** how fast it can possibly go. Two optimisations on top:
+  - **Idle gate** — before each probe, sample local NIC throughput. If you're actively using the network (> 500 kbps), the probe is skipped that cycle. Keeps netpulse from competing with your own video calls / downloads.
+  - **Adaptive cadence** — three consecutive healthy probes (≥ 2× threshold) → interval doubles, up to 1 hour. Any degraded/failed probe → reset to 5 min. Cuts daily probe volume by 50–80% on consistently-healthy links.
 - **TTFB** every 10 min to 3 popular sites → reflects "how snappy does the web feel"
 
 All samples land in a local SQLite file (`~/.netpulse/data.db`). A built-in web dashboard (`http://localhost:8089`) plots 1 h / 6 h / 24 h / 7 d trends. A Python analyzer emits a publishable Markdown report.
@@ -166,6 +168,9 @@ See `references/advanced.md` for multi-target strategies, exporting to Prometheu
 3. **TTFB vs ping mismatch**. Cloudflare DNS (1.1.1.1) might ping in 5 ms while `https://www.cloudflare.com/` has 400 ms TTFB. The gap is TLS handshake + app logic on their end, not your link.
 4. **System sleep**. On a laptop, sleep stops the daemon's measurements — there'll be a gap in the timeline, not bad data. Mention this if analyzing overnight data and there's an obvious hole matching the user's sleep hours.
 5. **`npm install` on first run** compiles native code. If it fails, the error is usually missing `gcc`/`make` on Linux or missing Xcode CLT on macOS. Suggest the fix explicitly.
+6. **Idle gate is local-only, not LAN-wide.** The idle gate sees *this machine's* NIC counters only. It cannot detect a housemate's video call on another device sharing the same uplink. The right mental model: "don't compete with *my own* traffic" — not "never probe while anyone on the LAN is using the network". If that's a hard requirement, either run netpulse on a machine that's always idle (e.g. an always-on server), or raise `speed.idleGate.thresholdKbps` higher.
+7. **Adaptive cadence means speed samples are sparse when things are good.** If the dashboard shows few dots for several hours, that's not a bug — it means the network passed threshold repeatedly and netpulse backed off. When something degrades, cadence snaps back to 5 min automatically.
+8. **Default-interface detection can pick VPN / utun / docker interfaces** when those own the default route. `scripts/status.sh` prints the chosen interface on recent runs; if it's wrong, disable idle gate in config.
 
 ## Philosophy
 

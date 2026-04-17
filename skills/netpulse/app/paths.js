@@ -10,6 +10,12 @@
 // Design intent: keep the plugin cache read-only so plugin updates never wipe
 // user data. All mutable state lives in $NETPULSE_DIR.
 
+// Private-by-default BEFORE any fs access: eliminates the race window where
+// files get created with the process's inherited umask and then get chmod'd
+// later. Running this first means every file the daemon creates lands at 600
+// (or 700 for dirs), no further mitigation needed.
+process.umask(0o077);
+
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
@@ -37,27 +43,70 @@ class ConfigError extends Error {
 }
 
 // Validate the shape enough to fail loudly on obvious typos (missing keys,
-// wrong types), but keep the check shallow — users adding new ping targets
-// or tuning thresholds shouldn't need to update code.
+// wrong types). Critical: every numeric field consumed by setInterval/setTimeout
+// or spawn() MUST be checked — otherwise missing/NaN values become 1-ms timers
+// and flood the network.
 function validateConfig(cfg, source) {
   const bad = (msg) => { throw new ConfigError(`${source}: ${msg}`, source); };
+  const posInt = (n) => Number.isInteger(n) && n > 0;
+  const posNum = (n) => Number.isFinite(n) && n > 0;
 
   if (!cfg || typeof cfg !== 'object') bad('not a JSON object');
   if (!Number.isInteger(cfg.port) || cfg.port < 1 || cfg.port > 65535) bad('port must be an integer 1-65535');
   if (typeof cfg.dbFile !== 'string' || !cfg.dbFile) bad('dbFile must be a non-empty string');
+  if (!posNum(cfg.retentionDays)) bad('retentionDays must be a positive number');
+
+  // ── ping ────────────────────────────────────────────────────────────────
   if (!cfg.ping || !Array.isArray(cfg.ping.targets) || cfg.ping.targets.length === 0) {
     bad('ping.targets must be a non-empty array');
   }
+  if (!posInt(cfg.ping.intervalSec)) bad('ping.intervalSec must be a positive integer');
+  if (!posInt(cfg.ping.timeoutMs)) bad('ping.timeoutMs must be a positive integer');
   for (const [i, t] of cfg.ping.targets.entries()) {
     if (!t || typeof t.host !== 'string' || !t.host) bad(`ping.targets[${i}].host must be a non-empty string`);
   }
-  if (!Number.isFinite(cfg.ping.intervalSec) || cfg.ping.intervalSec < 1) bad('ping.intervalSec must be >= 1');
-  if (!cfg.speed || typeof cfg.speed.testUrl !== 'string') bad('speed.testUrl must be a string URL');
-  if (!Number.isFinite(cfg.speed.thresholdMbps) || cfg.speed.thresholdMbps <= 0) {
-    bad('speed.thresholdMbps must be > 0');
+
+  // ── speed ───────────────────────────────────────────────────────────────
+  if (!cfg.speed) bad('speed section missing');
+  if (typeof cfg.speed.testUrl !== 'string' || !cfg.speed.testUrl.startsWith('http')) {
+    bad('speed.testUrl must be an http(s) URL');
   }
-  if (!cfg.ttfb || !Array.isArray(cfg.ttfb.targets)) bad('ttfb.targets must be an array');
-  if (!Number.isFinite(cfg.retentionDays) || cfg.retentionDays < 1) bad('retentionDays must be >= 1');
+  if (!posInt(cfg.speed.intervalSec)) bad('speed.intervalSec must be a positive integer');
+  if (!posInt(cfg.speed.timeoutSec)) bad('speed.timeoutSec must be a positive integer');
+  if (!posInt(cfg.speed.bytes)) bad('speed.bytes must be a positive integer');
+  if (!posNum(cfg.speed.thresholdMbps)) bad('speed.thresholdMbps must be > 0');
+
+  // Optional: adaptive cadence (only validated when present + enabled)
+  if (cfg.speed.adaptive) {
+    const a = cfg.speed.adaptive;
+    if (typeof a.enabled !== 'boolean') bad('speed.adaptive.enabled must be a boolean');
+    if (a.enabled) {
+      if (!posInt(a.minIntervalSec)) bad('speed.adaptive.minIntervalSec must be a positive integer');
+      if (!posInt(a.maxIntervalSec)) bad('speed.adaptive.maxIntervalSec must be a positive integer');
+      if (a.maxIntervalSec < a.minIntervalSec) bad('speed.adaptive.maxIntervalSec must be >= minIntervalSec');
+    }
+  }
+
+  // Optional: idle gate (only validated when present + enabled)
+  if (cfg.speed.idleGate) {
+    const g = cfg.speed.idleGate;
+    if (typeof g.enabled !== 'boolean') bad('speed.idleGate.enabled must be a boolean');
+    if (g.enabled) {
+      if (!posNum(g.thresholdKbps)) bad('speed.idleGate.thresholdKbps must be > 0');
+      if (!posInt(g.sampleWindowSec)) bad('speed.idleGate.sampleWindowSec must be a positive integer');
+    }
+  }
+
+  // ── ttfb ────────────────────────────────────────────────────────────────
+  if (!cfg.ttfb) bad('ttfb section missing');
+  if (!Array.isArray(cfg.ttfb.targets)) bad('ttfb.targets must be an array');
+  if (!posInt(cfg.ttfb.intervalSec)) bad('ttfb.intervalSec must be a positive integer');
+  if (!posInt(cfg.ttfb.timeoutSec)) bad('ttfb.timeoutSec must be a positive integer');
+  for (const [i, t] of cfg.ttfb.targets.entries()) {
+    if (!t || typeof t.url !== 'string' || !t.url.startsWith('http')) {
+      bad(`ttfb.targets[${i}].url must be an http(s) URL`);
+    }
+  }
 }
 
 function loadConfig() {

@@ -52,6 +52,8 @@ start_launchd() {
     <key>RunAtLoad</key><true/>
     <key>KeepAlive</key><true/>
     <key>ThrottleInterval</key><integer>10</integer>
+    <!-- Umask 63 = 0o077: private-by-default for any state files created. -->
+    <key>Umask</key><integer>63</integer>
     <key>StandardOutPath</key><string>$LOG_FILE</string>
     <key>StandardErrorPath</key><string>$LOG_FILE</string>
     <key>EnvironmentVariables</key>
@@ -93,6 +95,8 @@ WorkingDirectory=$APP_DIR
 # ping lives in /usr/bin on most Linux; include /sbin and /usr/sbin for BSD/Alpine edge cases
 Environment=PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 Environment="NETPULSE_DIR=$NETPULSE_DIR"
+# Private-by-default for state files created by the daemon.
+UMask=0077
 StandardOutput=append:$LOG_FILE
 StandardError=append:$LOG_FILE
 Restart=on-failure

@@ -64,6 +64,61 @@ The default 10 s ping / 10 min speed / 10 min TTFB is a sweet spot:
 "ttfb":  { "intervalSec": 1800 }
 ```
 
+## Idle gate + adaptive cadence (new in v1.0.3)
+
+The speed probe doesn't fire blindly every 10 minutes. Two optimisations decide when it actually runs:
+
+### Idle gate
+
+Before each speed probe, netpulse reads your default interface's NIC counters, waits 3 seconds, reads again. If the observed throughput exceeds a threshold (default **500 kbps**), the probe is skipped that cycle — netpulse will not compete with your own active traffic.
+
+```jsonc
+"speed": {
+  "idleGate": {
+    "enabled": true,        // set false to always probe
+    "thresholdKbps": 500,   // raise if you do background sync all day
+    "sampleWindowSec": 3    // seconds of observation before deciding
+  }
+}
+```
+
+**Important caveats** (explicit because they affect how to reason about results):
+
+- The idle gate sees *this machine's* NIC. It **cannot** detect a colleague's video call on another device on the same LAN. If you need LAN-wide idle awareness, either run netpulse on a dedicated always-idle machine, or raise `thresholdKbps` high enough to tolerate ambient LAN traffic.
+- Default-interface detection is best-effort. If you're on a VPN (utun / tun) or using Docker, the route might point to an interface that doesn't reflect real WAN usage. `scripts/status.sh` shows the chosen interface when available; disable the gate if the pick is wrong.
+- NIC counters can wrap/reset on link flap or reboot; netpulse treats a negative delta as "unknown" and fails open (runs the probe).
+
+### Adaptive cadence
+
+When the link is consistently healthy, the probe interval doubles. When something degrades, it resets.
+
+```jsonc
+"speed": {
+  "intervalSec": 600,       // default cadence (starting point)
+  "adaptive": {
+    "enabled": true,
+    "minIntervalSec": 300,  // floor after any failure
+    "maxIntervalSec": 3600  // ceiling when consistently healthy
+  }
+}
+```
+
+Rules:
+- 3 consecutive probes with mbps ≥ **2× threshold** → interval doubles (up to max)
+- Any failure or mbps < threshold → interval resets to `minIntervalSec`
+- On a healthy 1 Gb residential link, you'll typically see the cadence ramp from 10 min → 20 min → 40 min → 1 h within half a day.
+
+### Disabling either
+
+```jsonc
+"speed": {
+  "idleGate": { "enabled": false },
+  "adaptive": { "enabled": false }
+}
+```
+
+When both are off, behaviour matches v1.0.2 exactly: fixed-cadence probe every `intervalSec` seconds.
+
 ## Changing the threshold
 
 The threshold defines "does this qualify as usable?":

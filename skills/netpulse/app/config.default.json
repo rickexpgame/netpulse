@@ -1,22 +1,37 @@
 {
   "port": 8089,
   "dbFile": "data.db",
+
   "ping": {
     "intervalSec": 10,
     "timeoutMs": 3000,
     "targets": [
-      { "host": "8.8.8.8",   "label": "Google DNS" },
-      { "host": "1.1.1.1",   "label": "Cloudflare" },
-      { "host": "9.9.9.9",   "label": "Quad9" }
+      { "host": "8.8.8.8", "label": "Google DNS" },
+      { "host": "1.1.1.1", "label": "Cloudflare" },
+      { "host": "9.9.9.9", "label": "Quad9" }
     ]
   },
+
   "speed": {
     "intervalSec": 600,
     "testUrl": "https://speed.cloudflare.com/__down?bytes=1048576",
     "bytes": 1048576,
     "timeoutSec": 8,
-    "thresholdMbps": 5
+    "thresholdMbps": 5,
+
+    "adaptive": {
+      "enabled": true,
+      "minIntervalSec": 300,
+      "maxIntervalSec": 3600
+    },
+
+    "idleGate": {
+      "enabled": true,
+      "thresholdKbps": 500,
+      "sampleWindowSec": 3
+    }
   },
+
   "ttfb": {
     "intervalSec": 600,
     "targets": [
@@ -26,5 +41,6 @@
     ],
     "timeoutSec": 8
   },
+
   "retentionDays": 30
 }

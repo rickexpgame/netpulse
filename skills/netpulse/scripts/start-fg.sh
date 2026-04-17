@@ -3,6 +3,10 @@
 # Use this for smoke-testing or when you don't need persistence.
 set -euo pipefail
 
+# Private-by-default — every file the daemon creates lands at mode 600.
+# monitor.js/server.js also call process.umask(0o077) as defense in depth.
+umask 077
+
 SKILL_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 export NETPULSE_DIR="${NETPULSE_DIR:-$HOME/.netpulse}"
 
